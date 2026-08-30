@@ -1,0 +1,16 @@
+# TouchDesigner
+Backup/
+*.toe
+*.toe.bak
+*.tox.bak
+*.bak
+*.dmp
+logs/
+.embody/
+__pycache__/
+
+# OS / editors
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
