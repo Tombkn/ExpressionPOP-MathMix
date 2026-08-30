@@ -39,7 +39,7 @@ if old is not None:
 comp = parent.copy(src, name=NAME)
 comp.nodeX, comp.nodeY = 400, 400
 comp.color = (0.95, 0.70, 0.25)
-comp.comment = 'Function Store Expression POP mit fest eingebauter Math-Mix-GLSL-Bibliothek'
+comp.comment = 'Function Store Expression POP with the Math Mix GLSL library built in'
 
 gen      = comp.op('script1_callbacks')
 code_dat = comp.op('null_glsl')
@@ -49,7 +49,7 @@ glsl     = comp.op('glsl1')
 if comp.op('script1_callbacks_orig') is None and 'mathmix_lib' not in gen.text:
     bak = comp.copy(gen, name='script1_callbacks_orig')
     bak.nodeX, bak.nodeY = gen.nodeX + 200, gen.nodeY - 150
-    bak.comment = 'unveraenderter Function-Store-Generator (Referenz)'
+    bak.comment = 'stock Function Store generator, unchanged (reference)'
 
 
 def _ensure(opType, name, x, y):
@@ -63,13 +63,13 @@ def _ensure(opType, name, x, y):
 # 2) the library + a parking DAT for the generated array helpers
 lib = _ensure(textDAT, 'mathmix_lib', gen.nodeX, gen.nodeY - 150)
 lib.text = _read(SRC_DIR, 'mathmix_lib.glsl')
-lib.comment = 'Math-Mix-GLSL-Bibliothek — wird vor den generierten Code gehaengt'
+lib.comment = 'Math Mix GLSL library, prepended to the generated code'
 helpers = _ensure(textDAT, 'mathmix_helpers', gen.nodeX, gen.nodeY - 250)
-helpers.comment = 'pro Cook erzeugt: arrayadd(Name) & co. Leer, solange keine Expression sie nutzt.'
+helpers.comment = 'generated per cook: arrayadd(Name) & co. Empty until an expression uses one.'
 
 # 3) the library reaches the compiler without showing up in View=code
 shader = _ensure(mergeDAT, 'mathmix_shader', code_dat.nodeX + 200, code_dat.nodeY - 150)
-shader.comment = 'was glsl1 kompiliert: mathmix_lib + Array-Helfer + null_glsl'
+shader.comment = 'what glsl1 compiles: mathmix_lib + array helpers + null_glsl'
 for i, s in enumerate((lib, helpers, code_dat)):
     shader.inputConnectors[i].connect(s)
 glsl.par.computedat = shader
@@ -96,7 +96,7 @@ if about and comp.par['Mathmixversion'] is None:
     p = about[0].appendStr('Mathmixversion', label='Math Mix Library')[0]
     p.readOnly = True
     p.startSection = True
-    p.help = 'Version der fest eingebauten Math-Mix-GLSL-Bibliothek.'
+    p.help = 'Version of the built-in Math Mix GLSL library.'
 p = comp.par['Mathmixversion']
 if p is not None:
     p.default = VERSION
