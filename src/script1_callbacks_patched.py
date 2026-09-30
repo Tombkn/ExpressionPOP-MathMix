@@ -1,7 +1,7 @@
 import re
 
 # ---------------------------------------------------------------------------
-#  Expression POP generator (script1_callbacks) — patched for mathmix_lib  (v1.6)
+#  Expression POP generator (script1_callbacks) — patched for mathmix_lib  (v1.9)
 #  Drop-in replacement for the text of the 'script1_callbacks' DAT.
 #
 #  Changes vs. the original generator:
@@ -50,6 +50,21 @@ import re
 #                 (vec3(...) -> 3, else 1), which cannot see that P is a vec3.
 #                 A type on the left names the width outright, same spelling as
 #                 a Local line; the type is dropped from the generated code.
+#  11. SEVERAL INPUTS (v1.8) — the component grows one connector per block of its
+#                 Inputs sequence (Dan's MultiTop pattern: Replicator stamps in2, in3 ...
+#                 from in1 and wires them to glsl1). In a line, the second input's
+#                 attributes are in1_P, in1_Color ..., the third input's in2_P ...
+#                 (Math Mix POP naming: 0-based prefix, first input stays plain).
+#                 in1_P becomes TDIn_P(1u, _id1); _id1 is that input's index after the
+#                 Length Mismatch policy (hold / repeat / zero / one / none, as on the
+#                 Math Mix POP). A single-point input reads as a constant. Array helpers
+#                 work per input too: arrayadd(in1_Weights). Output still follows input 0.
+#  13. IGNORED LINES (v1.9) — a line the parser cannot split at '=' (no '=', or nothing
+#                 on one side of it) used to vanish without a trace: the shader stayed
+#                 empty, glsl1 compiled the empty main() and Info read "Compiled
+#                 Successfully" for `dwadwadw`. The generator now OWNS the Info text:
+#                 UpdateInfo() writes compile result + the ignored lines, called at the
+#                 end of every cook and from datexec1 when glsl1_info changes.
 # ---------------------------------------------------------------------------
 
 LIB_DAT = 'mathmix_lib'          # sibling textDAT holding mathmix_lib.glsl
@@ -92,16 +107,27 @@ DIM_SUBST = [
 # unavailable: they are the loop counter inside an array operation, which a plain
 # per-element expression has no equivalent for.
 
-# per-attribute array reductions, generated on demand (float array attributes)
+# per-attribute array reductions, generated on demand (float array attributes).
+# {n} attribute name, {k} input number, {key} helper suffix ('Weights' / 'in1_Weights').
 ARRAY_HELPERS = {
-	'arrayadd':  'float _arrayadd_{n}(uint id) {{ float s = 0.0; for (uint i = 0u; i < cTDArraySize_{n}; i++) s += float(TDIn_{n}(0u, id, i)); return s; }}',
-	'arraymult': 'float _arraymult_{n}(uint id) {{ float p = 1.0; for (uint i = 0u; i < cTDArraySize_{n}; i++) p *= float(TDIn_{n}(0u, id, i)); return p; }}',
-	'arrayavg':  'float _arrayavg_{n}(uint id) {{ float s = 0.0; for (uint i = 0u; i < cTDArraySize_{n}; i++) s += float(TDIn_{n}(0u, id, i)); return s / float(cTDArraySize_{n}); }}',
-	'arraymin':  'float _arraymin_{n}(uint id) {{ float m = float(TDIn_{n}(0u, id, 0u)); for (uint i = 1u; i < cTDArraySize_{n}; i++) m = min(m, float(TDIn_{n}(0u, id, i))); return m; }}',
-	'arraymax':  'float _arraymax_{n}(uint id) {{ float m = float(TDIn_{n}(0u, id, 0u)); for (uint i = 1u; i < cTDArraySize_{n}; i++) m = max(m, float(TDIn_{n}(0u, id, i))); return m; }}',
+	'arrayadd':  'float _arrayadd_{key}(uint id) {{ float s = 0.0; for (uint i = 0u; i < cTDArraySize_{n}; i++) s += float(TDIn_{n}({k}u, id, i)); return s; }}',
+	'arraymult': 'float _arraymult_{key}(uint id) {{ float p = 1.0; for (uint i = 0u; i < cTDArraySize_{n}; i++) p *= float(TDIn_{n}({k}u, id, i)); return p; }}',
+	'arrayavg':  'float _arrayavg_{key}(uint id) {{ float s = 0.0; for (uint i = 0u; i < cTDArraySize_{n}; i++) s += float(TDIn_{n}({k}u, id, i)); return s / float(cTDArraySize_{n}); }}',
+	'arraymin':  'float _arraymin_{key}(uint id) {{ float m = float(TDIn_{n}({k}u, id, 0u)); for (uint i = 1u; i < cTDArraySize_{n}; i++) m = min(m, float(TDIn_{n}({k}u, id, i))); return m; }}',
+	'arraymax':  'float _arraymax_{key}(uint id) {{ float m = float(TDIn_{n}({k}u, id, 0u)); for (uint i = 1u; i < cTDArraySize_{n}; i++) m = max(m, float(TDIn_{n}({k}u, id, i))); return m; }}',
 }
 ARRAY_CALL_RE = re.compile(r'\b(arraylength|arrayadd|arraymult|arrayavg|arraymin|arraymax)\(\s*(\w+)\s*\)')
 ASSIGN_RE = re.compile(r'(?<![=<>!])=(?!=)')     # first '=' that is not part of ==, >=, <=, !=
+# (11) in1_P -> attribute P of input 1 (the SECOND connector). Same guards as a plain
+# attribute: not after '.', not before '(' — and not inside another identifier.
+INPUT_ATTR_RE = re.compile(r'(?<![\w.])in(\d+)_([A-Za-z_]\w*)\b(?!\s*\()')
+MISMATCH_MODES = ('hold', 'repeat', 'zero', 'one', 'none')   # Length Mismatch menu, as on the Math Mix POP
+INFO_DAT = 'glsl1_info'          # sibling infoDAT with the compile result of glsl1
+INFO_JUNK = ('=============', '==========', 'Compute Shader Compile Results:')   # decoration in glsl1_info
+IGNORE_NO_ASSIGN = "no '='"
+IGNORE_NO_LEFT = "nothing left of '='"
+IGNORE_NO_RIGHT = "nothing right of '='"
+_ignored: list[tuple[int, str, str]] = []   # (block index, line as typed, reason) of the last cook
 
 SHADER_TEMPLATE = """
 <INSERT DEFINES HERE>
@@ -109,6 +135,7 @@ void main() {
 	const uint id = TDIndex();
 	if(id >= TDNumElements())
 		return;
+	<INPUT_INDICES_HERE>
 	<SUBSTITUTE_EXPRESSIONS_HERE>
 }
 """
@@ -197,28 +224,131 @@ def substitute_builtins(expr, dynamic=None):
 	return expr
 
 
-def substitute_arrays(expr, arrayNames, helpers):
+def substitute_arrays(expr, arrayNames, helpers, used):
 	"""arrayadd(Name) -> _arrayadd_Name(id) + helper definition; arraylength(Name) -> float(cTDArraySize_Name).
+	(11) arrayadd(in1_Name) reads input 1 at that input's own index: _arrayadd_in1_Name(_id1).
+	arrayNames: {token: (input number, attribute name)}, e.g. {'Weights': (0, 'Weights'), 'in1_Weights': (1, 'Weights')}.
 	Only for real array attributes — anything else is left alone (and fails visibly in GLSL)."""
 	def repl(m):
-		fn, name = m.group(1), m.group(2)
-		if name not in arrayNames:
+		fn, token = m.group(1), m.group(2)
+		if token not in arrayNames:
 			return m.group(0)
+		k, name = arrayNames[token]
 		if fn == 'arraylength':
 			return f'float(cTDArraySize_{name})'
-		helpers[f'{fn}_{name}'] = ARRAY_HELPERS[fn].format(n=name)
-		return f'_{fn}_{name}(id)'
+		used.add(k)
+		helpers[f'{fn}_{token}'] = ARRAY_HELPERS[fn].format(n=name, k=k, key=token)
+		return f'_{fn}_{token}({_indexVar(k)})'
 	return ARRAY_CALL_RE.sub(repl, expr)
 
 
-def substitute_attribs(expr, attribNames):
+def _indexVar(k) -> str:
+	"""The element index to read input k at: `id` for input 0, `_id1` / `_id2` ... otherwise."""
+	return 'id' if k == 0 else f'_id{k}'
+
+
+def _glslZero(attr, one=False) -> str:
+	"""A GLSL literal in the attribute's own type: 0.0 / vec3(0.0) / 0 / ivec2(0); 1.0 ... for `one`."""
+	isInt = getattr(attr, 'type', float) in (int, bool)
+	size = int(getattr(attr, 'size', 1) or 1)
+	v = ('1' if one else '0') if isInt else ('1.0' if one else '0.0')
+	if size <= 1:
+		return v
+	return f'{"ivec" if isInt else "vec"}{size}({v})'
+
+
+def substitute_input_attribs(expr, inputAttribs, mode, used, skip=frozenset()):
+	"""in1_P -> TDIn_P(1u, _id1): attribute P of the SECOND input (Math Mix POP naming, the prefix
+	counts from 0). in0_P is the same as plain P. `used` collects the input numbers a line touches,
+	so main() declares only the index variables it needs (_inputIndexLines).
+	A point beyond a shorter input's range follows the Length Mismatch policy: hold / repeat move
+	the INDEX (in _inputIndexLines), zero / one replace the VALUE right here, none reads raw.
+	Unknown names are left alone, so the GLSL error names them (in1_Foo : undeclared identifier)."""
+	def repl(m):
+		k, name = int(m.group(1)), m.group(2)
+		if m.group(0) in skip:                       # a Local of that exact name shadows it
+			return m.group(0)
+		attrs = inputAttribs.get(k)
+		if attrs is None or name not in attrs:
+			return m.group(0)
+		used.add(k)
+		if k == 0:
+			return f'TDIn_{name}()'
+		read = f'TDIn_{name}({k}u, _id{k})'
+		if mode in ('zero', 'one'):
+			return f'((_n{k} <= 1u || id < _n{k}) ? {read} : {_glslZero(attrs[name], mode == "one")})'
+		return read
+	return INPUT_ATTR_RE.sub(repl, expr)
+
+
+def _inputIndexLines(used, mode) -> str:
+	"""One `_nK` / `_idK` pair per extra input a line reads, resolved by the Length Mismatch policy.
+	A single-point input is a constant (index 0 for every point), same as the Math Mix POP."""
+	lines = []
+	for k in sorted(u for u in used if u > 0):
+		n, idx = f'_n{k}', f'_id{k}'
+		if mode == 'hold':
+			pick = f'min(id, {n} - 1u)'
+		elif mode == 'repeat':
+			pick = f'(id % {n})'
+		else:                                   # zero / one / none: same index, the VALUE is guarded
+			pick = 'id'
+		lines.append(f'const uint {n} = TDInputNumPoints({k}u);')
+		lines.append(f'const uint {idx} = ({n} <= 1u) ? 0u : {pick};')
+	return '\n\t'.join(lines)
+
+
+def _inputAttribs(inPOP):
+	"""{input number: {attribute name: attribute}} for every wired input of glsl1.
+	Input 0 is in1 (the POP handed in); 1, 2 ... are whatever in2, in3 ... carry right now."""
+	table = {0: {a.name: a for a in inPOP.pointAttributes}}
+	glsl = op(GLSL_OP)
+	if glsl is None:
+		return table
+	for k, conn in enumerate(glsl.inputConnectors):
+		if k == 0 or not conn.connections:
+			continue
+		try:
+			table[k] = {a.name: a for a in conn.connections[0].owner.pointAttributes}
+		except Exception:
+			table[k] = {}
+	return table
+
+
+def _mismatchMode() -> str:
+	"""Length Mismatch parameter of the component: what a point reads from an input with FEWER points."""
+	try:
+		p = parent().par['Lengthmismatch']
+		m = str(p.eval()).strip().lower() if p is not None else 'repeat'
+	except Exception:
+		m = 'repeat'
+	return m if m in MISMATCH_MODES else 'repeat'
+
+
+def substitute_attribs(expr, resolve, used, skip=frozenset()):
 	"""Age -> TDIn_Age()  — only where the name is used as a VALUE:
-	not after '.' (member access), not before '(' (function call), not inside other identifiers."""
-	for name in sorted(attribNames, key=len, reverse=True):
-		if name in RESERVED:
+	not after '.' (member access), not before '(' (function call), not inside other identifiers.
+
+	(12) A BARE name belongs to the FIRST input that carries it. Usually that is input 0, but
+	an attribute only the second input has (`dick`) is unambiguous, so it needs no prefix and
+	reads from there: `TDIn_dick(1u, _id1)`. `in1_dick` keeps working and always names input 1
+	outright. The Use As line on the Inputs page shows exactly this: a prefix appears only
+	where an earlier input carries the same name, i.e. exactly where the bare name is taken.
+
+	resolve: {attribute name: input number that a bare mention reads}.
+	skip:    names declared on an earlier Local line. A local SHADOWS an attribute of the same
+	         name, as it would in C. Without this, `float d = ...` on a Local line followed by
+	         `P = P + N * d` silently reads an attribute `d` off another input instead of the
+	         value just computed -- it compiles, and quietly means something else."""
+	for name in sorted(resolve, key=len, reverse=True):
+		if name in RESERVED or name in skip:
 			continue
 		pattern = r'(?<![\w.])' + re.escape(name) + r'\b(?!\s*\()'
-		expr = re.sub(pattern, f'TDIn_{name}()', expr)
+		if not re.search(pattern, expr):
+			continue
+		k = resolve[name]
+		used.add(k)
+		expr = re.sub(pattern, f'TDIn_{name}()' if k == 0 else f'TDIn_{name}({k}u, {_indexVar(k)})', expr)
 	return expr
 
 
@@ -297,6 +427,23 @@ def _numComps(rightSide, localTypes):
 	return widest
 
 
+EXACT_READ_RE = re.compile(r'^\s*([A-Za-z_]\w*)(?:\.([xyzwrgbastpq]{1,4}))?\s*$')
+
+
+def _exactReadWidth(rawRight, readSizes) -> int:
+	"""`cp = P` -> 3, `cp = in1_P` -> 3, `uv = in1_P.xy` -> 2: a line that only copies one
+	attribute takes that attribute's width. Anything more (`float(in1_P.x == 0.0)`) -> 0, so
+	the usual rule decides; merely mentioning a vec3 must not turn a float result into one.
+
+	readSizes covers every name a right side may use: bare names (resolved to the first input
+	that carries them, same as substitute_attribs) and the explicit in{k}_ spellings."""
+	m = EXACT_READ_RE.match(rawRight)
+	if not m:
+		return 0
+	size = readSizes.get(m.group(1), 0)
+	return len(m.group(2)) if (size and m.group(2)) else size
+
+
 def _syncOutputAttrs(wanted, outNames):
 	"""Declare NEW output attributes on the GLSL POP, and tell it which attributes
 	the expressions write to (par.outputattrs).
@@ -373,6 +520,31 @@ def _syncOutputAttrs(wanted, outNames):
 	run('args[0].cook(force=True)', glsl, delayFrames=1, fromOP=glsl)
 
 
+def _cleanCompileText(text: str) -> str:
+	for junk in INFO_JUNK:
+		text = text.replace(junk, '')
+	return text.strip()
+
+
+def UpdateInfo(compileText: str | None = None) -> None:
+	"""Write the component's Info par: compile result of glsl1 + the lines this generator
+	ignored on its last cook (13). Two callers, two halves of the truth:
+	  - onCook, deferred by one frame via run(): the ignored list changed;
+	  - datexec1.onTableChange: glsl1_info changed, the compile text is fresh.
+	Never called from inside a cook (reading glsl1_info there would close a dependency
+	loop back to script1), and written only when the text differs."""
+	if compileText is None:
+		infoDAT = op(INFO_DAT)
+		compileText = infoDAT.text if infoDAT is not None else ''
+	text = _cleanCompileText(compileText)
+	if _ignored:                                                      # first: the Info field is narrow
+		items = ', '.join(f"line {i} '{line}': {why}" for i, line, why in _ignored)
+		text = f"IGNORED {items} | {text}"
+	comp = parent.ExpressionPOP
+	if comp.par.Info.eval() != text:
+		comp.par.Info = text
+
+
 def onCook(scriptOp):
 	if not scriptOp.inputs:
 		return
@@ -382,7 +554,24 @@ def onCook(scriptOp):
 	inDAT = scriptOp.inputs[0]
 	attribs = list(inPOP.pointAttributes)
 	attribNames = [a.name for a in attribs]
-	arrayNames = {a.name for a in attribs if _isArrayAttrib(a)}
+	inputAttribs = _inputAttribs(inPOP)                                   # (11) {k: {name: attr}}
+	# (12) A bare name belongs to the FIRST input that carries it: input 0 where it exists,
+	# otherwise the lowest-numbered input that does. That is precisely the rule the Use As
+	# line draws, which is why a name shown without a prefix can be typed without one.
+	resolve, arrayNames, readSizes = {}, {}, {}
+	for k in sorted(inputAttribs):
+		for n, a in inputAttribs[k].items():
+			resolve.setdefault(n, k)
+			size = int(getattr(a, 'size', 1) or 1)
+			readSizes.setdefault(n, size)
+			if _isArrayAttrib(a):
+				arrayNames.setdefault(n, (k, n))
+			if k > 0:                                                     # explicit spelling always works
+				readSizes[f'in{k}_{n}'] = size
+				if _isArrayAttrib(a):
+					arrayNames[f'in{k}_{n}'] = (k, n)
+	mode = _mismatchMode()
+	usedInputs = set()
 	inExpressions = (inDAT.row('Expr_expression', val=True) or [])[1:]
 	inLeftmodes = (inDAT.row('Expr_leftmode', val=True) or [])[1:]
 
@@ -392,21 +581,29 @@ def onCook(scriptOp):
 	localTypes = {}          # local name -> components, for width inference
 	newAttrs = {}            # name -> components for attributes the input lacks (in order)
 	outNames = []            # base name of every OutAttr line, in order, no duplicates
+	ignored = []             # (13) lines that produce no code, reported in Info
 	for idx, inExpression in enumerate(inExpressions):
 		line = re.sub(r'//.*$', '', str(inExpression)).strip()      # (6) drop // comments
 		if not line:
 			continue
 		m = ASSIGN_RE.search(line)                                   # (2) first real '='
 		if m is None:
+			ignored.append((idx, line[:40], IGNORE_NO_ASSIGN))       # (13) `dwadwadw`
 			continue
 		leftSide = line[:m.start()].strip()
 		rightSide = line[m.end():].strip().rstrip(';').strip()       # (6) tolerate trailing ';'
-		if not leftSide or not rightSide:
+		if not leftSide:
+			ignored.append((idx, line[:40], IGNORE_NO_LEFT))         # (13) `= P * 2.0`
+			continue
+		if not rightSide:
+			ignored.append((idx, line[:40], IGNORE_NO_RIGHT))        # (13) `P =`
 			continue
 		rawRight = rightSide            # (8) width inference reads the UNSUBSTITUTED text
 		rightSide = substitute_builtins(rightSide, dynamic)                   # (4)+(7)
-		rightSide = substitute_arrays(rightSide, arrayNames, array_helpers)   # (3)
-		rightSide = substitute_attribs(rightSide, attribNames)       # (5)
+		rightSide = substitute_arrays(rightSide, arrayNames, array_helpers, usedInputs)   # (3)+(11)
+		locals_ = frozenset(localTypes)                                  # (12) locals shadow attributes
+		rightSide = substitute_input_attribs(rightSide, inputAttribs, mode, usedInputs, locals_)   # (11) in1_P
+		rightSide = substitute_attribs(rightSide, resolve, usedInputs, locals_)   # (5)+(12) bare -> first input
 		leftMode = _leftMode(inLeftmodes[idx] if idx < len(inLeftmodes) else 0)
 		if leftMode:                                                 # (8) remember locals
 			nm, comps = _localDecl(leftSide)
@@ -421,7 +618,8 @@ def onCook(scriptOp):
 			if base and base not in outNames:
 				outNames.append(base)
 			if base and base not in attribNames:                     # new: wide enough for RHS AND target
-				need = typedComps or max(_numComps(rawRight, localTypes), _minCompsForTarget(rest))
+				exact = _exactReadWidth(rawRight, readSizes)               # (11)+(12) `cp = P` / `cp = in1_P` -> 3
+				need = typedComps or max(exact or _numComps(rawRight, localTypes), _minCompsForTarget(rest))
 				newAttrs[base] = max(newAttrs.get(base, 1), need)
 		define_name, define_text, define_expression = make_glsl_define(idx, leftSide, rightSide, leftMode=leftMode)
 		glsl_expressions[define_name] = (define_text, define_expression)
@@ -429,9 +627,20 @@ def onCook(scriptOp):
 	_syncOutputAttrs(list(newAttrs.items()), outNames)                # (8)+(9) declare + allocate on glsl1
 	header = _header(array_helpers)                                   # (1) library out of sight
 	code = SHADER_TEMPLATE.replace('<INSERT DEFINES HERE>\n', f'{header}\n' if header else '').lstrip('\n')
+	indexLines = _inputIndexLines(usedInputs, mode)                   # (11) _n1/_id1 per extra input used
+	code = code.replace('<INPUT_INDICES_HERE>\n\t', f'{indexLines}\n\t' if indexLines else '')
 	expressions_text = '\n\t'.join([f'{define_expression};' for define_text, define_expression in glsl_expressions.values()])
+	if ignored:                                                       # (13) visible in View = code as well
+		notes = '\n\t'.join(f"// ignored line {i} '{line}': {why} -- write  target = expression" for i, line, why in ignored)
+		expressions_text = f'{notes}\n\t{expressions_text}' if expressions_text else notes
 	code = code.replace('<SUBSTITUTE_EXPRESSIONS_HERE>', expressions_text)
 	scriptOp.text = code                                              # assigned last: a bad line never empties the shader
+	if ignored != _ignored:                                           # (13) the list changed: show it
+		_ignored[:] = ignored
+		# Deferred, NOT called here: UpdateInfo() reads glsl1_info, and a read inside this
+		# cook would make script1 depend on glsl1_info -> glsl1 -> mathmix_shader -> null_glsl
+		# -> ... -> script1, a cook dependency loop. One frame later it is a plain read.
+		run('args[0].module.UpdateInfo()', me, delayFrames=1, fromOP=scriptOp)
 	return
 
 

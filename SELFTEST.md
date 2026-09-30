@@ -60,3 +60,73 @@ Nebenbei bewiesen, ohne dass du etwas tun musst:
 TouchDesigner 2025.32820, Point Generator POP mit 10 Punkten: alle vier
 Komponenten **0.0** an jedem Punkt, größte Abweichung über alle Punkte **0.0**,
 keine Compile-Fehler.
+
+Erneut TouchDesigner 2025.33230 (v1.9.1, 2026-10-01): dieselbe Zeile, größte
+Abweichung **0.0**. *Re-run on 2025.33230: max deviation 0.0.*
+
+## Mehrere Eingänge / Several inputs (1.8)
+
+**Idee:** Denselben POP in **beide** Eingänge hängen. Dann muss `in1_P` Punkt für
+Punkt dasselbe sein wie `P`, und die Differenz ist überall 0.
+
+*Feed the same POP into both inputs: `in1_P` must then equal `P` point for point.*
+
+### So testest du / How to run
+
+1. Seite **Inputs**, "+" drücken. Der Node bekommt einen zweiten Stecker.
+2. **Denselben** POP in beide Stecker hängen (z. B. einen Point Generator POP).
+3. Auf der Inputs-Seite steht jetzt in beiden Blöcken dieselbe Attributliste,
+   nur mit unterschiedlichem Präfix:
+   `P[vec3], Age[float]` und `in1_P[vec3], in1_Age[float]`.
+4. Eine OutAttr-Zeile:
+
+```
+selftest2 = length(P - in1_P) + abs(float(_NumPoints) - float(_NumPoints))
+```
+
+Muss auf jedem Punkt **0.0** sein.
+
+**Gegenprobe, damit der Test etwas beweist:** einen *anderen* POP in den zweiten
+Stecker hängen. Jetzt muss der Wert **ungleich 0** sein. Ohne diesen Schritt
+könnte die Zeile auch dann 0 zeigen, wenn `in1_P` gar nichts liest.
+
+*Control: wire a different POP into the second input; the value must now be
+non-zero. Without that step a passing test proves nothing.*
+
+### Was dabei mitbewiesen wird / Also covered
+
+| Beobachtung | Was sie zeigt |
+|---|---|
+| Zeile kompiliert | `in1_` wird als Präfix erkannt und zu `TDIn_P(1u, _id1)` übersetzt |
+| Ergebnis 0.0 | der zweite Eingang wird punktgenau gelesen, kein Indexversatz |
+| Gegenprobe ≠ 0 | es wird wirklich Eingang 2 gelesen, nicht zweimal Eingang 1 |
+| `_NumPoints`-Term 0.0 | Built-ins beziehen sich weiter auf den **ersten** Eingang |
+| **Use As** zeigt beide Listen | die Anzeige folgt dem, was wirklich am Stecker hängt |
+
+### Length Mismatch prüfen / Checking Length Mismatch
+
+Den zweiten Point Generator POP auf **3** Punkte stellen, den ersten auf 10, und
+`cp = in1_P` schreiben. Dann zeigt `cp`:
+
+| Length Mismatch | ab Punkt 3 |
+|---|---|
+| Repeat | die drei Positionen im Kreis, `id % 3` |
+| Hold | immer die letzte, Punkt 2 |
+| Zero | Nullen |
+| One | Einsen |
+
+Auf **1** Punkt gestellt liest jeder Punkt denselben Wert, in jedem Modus, weil
+ein Einzelpunkt-Eingang eine Konstante ist.
+
+### Leerer Stecker / Empty connector
+
+Einen Block mit "+" anlegen und **nichts** anschließen. Der Node muss weiter
+laufen: der Eingang liest dann einen 1-Punkt-Ersatz, `in1_P` ist `0.0`. Ein
+Attributname, den es dort nicht gibt, sagt weiterhin klar
+`'in1_Heat' : undeclared identifier`.
+
+### Verifiziert / Verified
+
+TouchDesigner 2025.32820, Noise POP mit 3050 Punkten in beide Stecker: Abweichung
+**0.0** auf allen 3050 Punkten. Gegenprobe mit einem anderen POP am zweiten
+Stecker: Maximum **9.85**, der Test schlägt also an.

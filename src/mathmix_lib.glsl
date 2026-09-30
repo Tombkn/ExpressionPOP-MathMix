@@ -14,6 +14,7 @@
 //     (atan2, angle, sind/cosd/... helpers). GLSL built-ins stay radians.
 //     Radian twins: atan2rad, anglerad.
 //   • int(A) -> trunc(A);  int(A / B) -> intdiv(A, B);  A if C else B -> ifelse(A, B, C)
+//     C may be 1.0/0.0 (gt(...), Math Mix style) or a GLSL comparison (P.x > 0.0)
 //   • comparisons as functions (return 1.0 / 0.0): gt gte lt lte eq ne,
 //     range checks: bltealtc = B <= A < C, bltaltec = B < A <= C,
 //     bltaltc = B < A < C, bltealtec = B <= A <= C
@@ -176,6 +177,15 @@ vec4  ifelse(vec4 a, vec4 b, float c)   { return (c > 0.0) ? a : b; }
 vec2  ifelse(vec2 a, vec2 b, vec2 c)    { return mix(b, a, vec2(greaterThan(c, vec2(0.0)))); }   // component-wise C
 vec3  ifelse(vec3 a, vec3 b, vec3 c)    { return mix(b, a, vec3(greaterThan(c, vec3(0.0)))); }
 vec4  ifelse(vec4 a, vec4 b, vec4 c)    { return mix(b, a, vec4(greaterThan(c, vec4(0.0)))); }
+// ... and with a GLSL comparison as C: ifelse(A, B, P.x > 0.0). A comparison is a bool in
+// GLSL, not 1.0/0.0 as on the Math Mix POP, so these overloads take it as written.
+float ifelse(float a, float b, bool c)  { return c ? a : b; }
+vec2  ifelse(vec2 a, vec2 b, bool c)    { return c ? a : b; }
+vec3  ifelse(vec3 a, vec3 b, bool c)    { return c ? a : b; }
+vec4  ifelse(vec4 a, vec4 b, bool c)    { return c ? a : b; }
+vec2  ifelse(vec2 a, vec2 b, bvec2 c)   { return mix(b, a, vec2(c)); }   // component-wise: greaterThan(P.xy, vec2(0.0))
+vec3  ifelse(vec3 a, vec3 b, bvec3 c)   { return mix(b, a, vec3(c)); }
+vec4  ifelse(vec4 a, vec4 b, bvec4 c)   { return mix(b, a, vec4(c)); }
 
 // loop(A, B, C): sawtooth between B and C   (TD's TDLoop)
 float loop(float a, float b, float c) { float v = (a - b) / (c - b); return mix(b, c, fract(v)); }
