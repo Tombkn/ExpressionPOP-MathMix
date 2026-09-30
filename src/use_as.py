@@ -47,7 +47,7 @@ def UseAs(comp, k):
 	"""The Use As line of block k: how to reach this input, and what is on it.
 
 	A name carries its in{k}_ prefix ONLY where an EARLIER input has the same attribute --
-	the one case where the bare name is already taken. A name unique to this input (`dick` on
+	the one case where the bare name is already taken. A name unique to this input (`mass` on
 	the second input, when the first has none) stays bare and may be typed bare. The generator
 	resolves a bare name to the FIRST input carrying it, which is the same rule seen from the
 	other side, so the line and the shader can never disagree.

@@ -330,8 +330,8 @@ def substitute_attribs(expr, resolve, used, skip=frozenset()):
 	not after '.' (member access), not before '(' (function call), not inside other identifiers.
 
 	(12) A BARE name belongs to the FIRST input that carries it. Usually that is input 0, but
-	an attribute only the second input has (`dick`) is unambiguous, so it needs no prefix and
-	reads from there: `TDIn_dick(1u, _id1)`. `in1_dick` keeps working and always names input 1
+	an attribute only the second input has (`mass`) is unambiguous, so it needs no prefix and
+	reads from there: `TDIn_mass(1u, _id1)`. `in1_mass` keeps working and always names input 1
 	outright. The Use As line on the Inputs page shows exactly this: a prefix appears only
 	where an earlier input carries the same name, i.e. exactly where the bare name is taken.
 

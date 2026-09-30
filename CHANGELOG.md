@@ -13,7 +13,8 @@
   table, and the whole Inputs page (wire, field, wire beats field, Length Mismatch
   hold / repeat / zero / one, single point, arrays through `in1_`, bare names for
   unique attributes, a Local shadowing an attribute, chaining two components).
-- README rewritten for GitHub: requirements, repository layout, build from source.
+- README rewritten for GitHub: shorter, every function listed with its types
+  (float / vec2 / vec3 / vec4), the *Types in Use As* toggle, requirements, build steps.
 
 ## 1.9 (2026-09-12)
 
@@ -57,10 +58,10 @@ Several POP inputs, combined in one line the way the Math Mix POP does it.
   counts from 0. `in1_P` compiles to `TDIn_P(1u, _id1)`.
 - **A prefix is only needed where the name is taken.** A bare name means the
   FIRST input that carries it, so an attribute unique to the second input
-  (`dick`, where the first input has none) is written bare. The Use As line draws
+  (`mass`, where the first input has none) is written bare. The Use As line draws
   the same rule from the other side — it prints a prefix exactly where an earlier
   input has that attribute — so the page and the shader cannot drift apart.
-  `in1_dick` keeps working and always names input 1 outright.
+  `in1_mass` keeps working and always names input 1 outright.
 - **A Local shadows an attribute of the same name**, as it would in C. Without
   that, `float d = …` on a Local line followed by `P = P + N * d` silently read
   an attribute `d` off another input: it compiled, and quietly meant something
