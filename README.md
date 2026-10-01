@@ -248,8 +248,7 @@ unique names, Local shadowing, two components chained).
 ## Build from source
 
 Only needed to change the library or the generator; the `.tox` is already built.
-Open a project with the **Function Store tools** loaded, set `REPO` in
-`src/build_expressionpop_mathmix.py`, then in the textport:
+Set `REPO` in `src/build_expressionpop_mathmix.py`, then in the textport:
 
 ```python
 exec(open(r'<repo>\src\build_expressionpop_mathmix.py', encoding='utf-8').read())
@@ -260,6 +259,8 @@ Formulas follow TouchDesigner's own
 
 ---
 
+## Credits
+
 Expression POP by [Function Store](https://www.instagram.com/function.str/) (original creator).
-Math Mix library, Inputs page and this build by [Tom](https://www.instagram.com/tomxbkn/).
+Math Mix library, Inputs page and this build by [Tom](https://www.instagram.com/tombkn/).
 Multi-input pattern after Dan's MultiTop.
