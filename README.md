@@ -262,5 +262,5 @@ Formulas follow TouchDesigner's own
 ## Credits
 
 Expression POP by [Function Store](https://www.instagram.com/function.str/) (original creator).
-Math Mix library, Inputs page and this build by [Tom](https://www.instagram.com/tombkn/).
+Math Mix library, Inputs page and this build by [Tom](https://www.instagram.com/tomxbkn/).
 Multi-input pattern after Dan's MultiTop.
